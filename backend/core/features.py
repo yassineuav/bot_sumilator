@@ -44,7 +44,13 @@ def compute_features(df):
     df['dist_ma20'] = (df['Close'] - df['ma20']) / df['ma20']
     df['dist_ma50'] = (df['Close'] - df['ma50']) / df['ma50']
     
-    # Higher Highs / Lower Lows (simple version)
+    # 6. Trend Strength (ADX)
+    adx = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=14)
+    df['adx'] = adx.adx()
+    df['adx_pos'] = adx.adx_pos()
+    df['adx_neg'] = adx.adx_neg()
+    
+    # 7. Higher Highs / Lower Lows (simple version)
     df['higher_high'] = (df['High'] > df['High'].shift(1)).astype(int)
     df['lower_low'] = (df['Low'] < df['Low'].shift(1)).astype(int)
     

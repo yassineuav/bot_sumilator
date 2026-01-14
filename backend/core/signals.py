@@ -18,10 +18,12 @@ def generate_signals(df, model):
     # Probability of the predicted class
     df['confidence'] = np.max(probs, axis=1)
     
-    # Define signal type
+    # Define signal type with threshold
     df['signal'] = 'NO TRADE'
-    df.loc[df['prediction'] == 1, 'signal'] = 'CALL'
-    df.loc[df['prediction'] == -1, 'signal'] = 'PUT'
+    
+    # Only assign signals if confidence is >= 0.55
+    df.loc[(df['prediction'] == 1) & (df['confidence'] >= 0.55), 'signal'] = 'CALL'
+    df.loc[(df['prediction'] == -1) & (df['confidence'] >= 0.55), 'signal'] = 'PUT'
     
     # Add reasoning (Top features or indicator status)
     df['reason'] = ""

@@ -54,16 +54,38 @@ class Backtester:
                     # or fixed DTE provided? 
                     eff_dte = max(0.4, self.target_dte)
                     
+                    # Calculate dynamic volatility from recent price history (e.g. last 20 steps)
+                    # If history too short, default to 0.20
+                    if len(trade['price_history']) > 2:
+                        hist_series = pd.Series(trade['price_history'])
+                        returns = hist_series.pct_change().dropna()
+                        # Annualize
+                        annual_factor = (252 * steps) ** 0.5
+                        if len(returns) > 1:
+                            dynamic_vol = returns.std() * annual_factor
+                            if pd.isna(dynamic_vol) or dynamic_vol < 0.15:
+                                dynamic_vol = 0.15
+                        else:
+                            dynamic_vol = 0.15
+                    else:
+                        dynamic_vol = 0.15
+
                     contract_prices = self.options_engine.simulate_contract_price(
                         trade['price_history'],
                         strike_pct=1.005 if trade['type'] == 'CALL' else 0.995,
                         dte=eff_dte,
-                        initial_vol=0.25,
+                        initial_vol=dynamic_vol,
                         steps_per_day=steps
                     )
+                    
+                    # Clamp Minimum Option Price to $0.10 to prevent unrealistic % gains from penny options
+                    entry_opt = max(0.10, contract_prices[0])
+                    # We must also clamp the current price if we want consistent PnL logic, 
+                    # but actually we just care that the ENTRY wasn't unrealistically cheap.
+                    # The exit price depends on the market.
                     curr_opt = contract_prices[-1]
-                    entry_opt = contract_prices[0]
-                    pnl_pct = (curr_opt - entry_opt) / entry_opt if entry_opt != 0 else 0
+                    
+                    pnl_pct = (curr_opt - entry_opt) / entry_opt
                 else:
                     if trade['type'] == 'CALL':
                         pnl_pct = (row['Close'] - trade['entry_price']) / trade['entry_price']
@@ -73,17 +95,19 @@ class Backtester:
                 trade['unrealized_pnl_val'] = trade['size'] * pnl_pct
                 
                 # Check Exit Conditions
-                should_exit, reason, _ = self.risk_manager.check_exit_conditions(
-                    trade['entry_price'], row['Close'], trade['type']
-                )
+                # DEFAULT EXIT: Use RiskManager for Stop Loss (pct)
+                # PROFIT TARGET: User wants to sell at $0.40 or more
+                should_exit = False
+                reason = "Target"
                 
                 if pnl_pct <= -self.risk_manager.stop_loss_pct:
                     should_exit, reason = True, "Stop Loss"
+                elif self.options_mode and curr_opt >= 0.40:
+                    should_exit, reason = True, "Price Target ($0.40)"
                 elif pnl_pct >= self.risk_manager.tp_stages[0][0]:
-                    should_exit, reason = True, "Take Profit"
+                     # Fallback to percentage TP if reached before price target
+                    should_exit, reason = True, "Take Profit (%)"
                     
-                # Opposite Signal Exit? (Optional, skipping for multi-trade logic mostly)
-
                 if should_exit:
                     exit_val = trade['size'] * (1 + pnl_pct)
                     pnl_val = exit_val - trade['size']
@@ -109,19 +133,57 @@ class Backtester:
                 trades_today < 5 and 
                 row['signal'] != 'NO TRADE'):
                 
-                size = self.risk_manager.calculate_position_size(self.balance)
-                if size > 10:
-                    new_trade = {
-                        'entry_time': row['Datetime'],
-                        'type': row['signal'],
-                        'entry_price': row['Close'],
-                        'size': size,
-                        'confidence': row['confidence'],
-                        'unrealized_pnl_val': 0,
-                        'price_history': [row['Close']]
-                    }
-                    active_trades.append(new_trade)
-                    trades_today += 1
+                # OPTION PRICE FILTER: Only buy if Option Price is between $0.10 and $0.30
+                check_price = True
+                entry_option_price = 0.0
+                
+                if self.options_mode:
+                    # needed to estimate price
+                    lookback = 20
+                    past_data = self.df.iloc[max(0, i-lookback):i+1]
+                    if len(past_data) > 2:
+                        returns = past_data['Close'].pct_change().dropna()
+                        annual_factor = (252 * steps) ** 0.5
+                        vol = returns.std() * annual_factor
+                        if pd.isna(vol) or vol < 0.15: vol = 0.15
+                    else:
+                        vol = 0.25
+                        
+                    # STRIKE: Out of money strik price option by 2 or 3$ far.
+                    # For a $600 stock, $3 is 0.5%. Using 0.005 offset.
+                    strike_pct = 1.005 if row['signal'] == 'CALL' else 0.995
+                    strike = row['Close'] * strike_pct
+                    dte_days = max(0.4, self.target_dte)
+                    T = dte_days / 365.0
+                    
+                    res = self.options_engine.black_scholes(
+                        S=row['Close'], 
+                        K=strike, 
+                        T=T, 
+                        r=0.05, 
+                        sigma=vol, 
+                        option_type='call' if row['signal'] == 'CALL' else 'put'
+                    )
+                    entry_option_price = res['price']
+                    
+                    # THE FILTER ($0.1 to $0.3)
+                    if not (0.10 <= entry_option_price <= 0.30):
+                        check_price = False
+                
+                if check_price:
+                    size = self.risk_manager.calculate_position_size(self.balance)
+                    if size > 10:
+                        new_trade = {
+                            'entry_time': row['Datetime'],
+                            'type': row['signal'],
+                            'entry_price': row['Close'],
+                            'size': size,
+                            'confidence': row['confidence'],
+                            'unrealized_pnl_val': 0,
+                            'price_history': [row['Close']]
+                        }
+                        active_trades.append(new_trade)
+                        trades_today += 1
                     
         # Finalize
         self.journal.save()

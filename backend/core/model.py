@@ -11,9 +11,12 @@ MODEL_PATH = 'trading_model.joblib'
 class TradingModel:
     def __init__(self):
         self.model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
+            n_estimators=300,
+            max_depth=7,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            min_child_weight=1,
             objective='multi:softmax',
             num_class=3, # -1, 0, 1 mapped to 0, 1, 2
             random_state=42
@@ -23,7 +26,7 @@ class TradingModel:
     def _prepare_data(self, df):
         # Map labels: -1 -> 0, 0 -> 1, 1 -> 2
         y = df['target'].map({-1: 0, 0: 1, 1: 2})
-        X = df.drop(columns=['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume', 'target', 'label', 'future_close', 'future_return'], errors='ignore')
+        X = df.drop(columns=['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume', 'target', 'label', 'future_close', 'future_return', 'Capital Gains', 'Dividends', 'Stock Splits'], errors='ignore')
         self.feature_cols = X.columns.tolist()
         return X, y
 

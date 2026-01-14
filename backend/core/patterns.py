@@ -10,50 +10,31 @@ def label_data(df):
     """
     df = df.copy()
     
-    # Bullish Trend Start Criteria:
-    # - RSI > 50 and rising
-    # - MACD bullish crossover (line > signal)
-    # - Price > MA20 & Price > MA50
-    # - Higher High (using previous High)
-    bullish_mask = (
-        (df['rsi'] > 50) & 
-        (df['rsi'] > df['rsi'].shift(1)) &
-        (df['macd_line'] > df['macd_signal']) &
-        (df['Close'] > df['ma20']) &
-        (df['Close'] > df['ma50']) &
-        (df['High'] > df['High'].shift(1))
-    )
+    # Bullish Trend:
+    # - Price > MA50 (Main trend filter)
+    # - OR MACD Bullish OR RSI > 50
+    bullish_mask = (df['Close'] > df['ma50']) & ((df['macd_line'] > df['macd_signal']) | (df['rsi'] > 50))
     
-    # Bearish Trend Start Criteria:
-    # - RSI < 50 and falling
-    # - MACD bearish crossover (line < signal)
-    # - Price < MA20 & Price < MA50
-    # - Lower Low
-    bearish_mask = (
-        (df['rsi'] < 50) & 
-        (df['rsi'] < df['rsi'].shift(1)) &
-        (df['macd_line'] < df['macd_signal']) &
-        (df['Close'] < df['ma20']) &
-        (df['Close'] < df['ma50']) &
-        (df['Low'] < df['Low'].shift(1))
-    )
+    # Bearish Trend:
+    # - Price < MA50
+    # - OR MACD Bearish OR RSI < 50
+    bearish_mask = (df['Close'] < df['ma50']) & ((df['macd_line'] < df['macd_signal']) | (df['rsi'] < 50))
     
     df['label'] = 0
     df.loc[bullish_mask, 'label'] = 1
     df.loc[bearish_mask, 'label'] = -1
     
     # Future target (1 if price moves in our direction in next N bars)
-    # This is useful for training. Let's look 5 bars ahead.
-    horizon = 5
+    horizon = 10 # Predict further out for more stability
     df['future_close'] = df['Close'].shift(-horizon)
     df['future_return'] = (df['future_close'] - df['Close']) / df['Close']
     
-    # Refine label: It's only a good "1" if price actually goes up in future
-    # and only a good "-1" if price actually goes down.
-    # We use this as the training target.
+    # Training Target
     df['target'] = 0
-    df.loc[(df['label'] == 1) & (df['future_return'] > 0.001), 'target'] = 1
-    df.loc[(df['label'] == -1) & (df['future_return'] < -0.001), 'target'] = -1
+    # Target 1: Currently Bullish AND price goes up further
+    df.loc[(df['label'] == 1) & (df['future_return'] > 0.0005), 'target'] = 1
+    # Target -1: Currently Bearish AND price goes down further
+    df.loc[(df['label'] == -1) & (df['future_return'] < -0.0005), 'target'] = -1
     
     return df.dropna()
 

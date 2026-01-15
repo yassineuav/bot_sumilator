@@ -6,10 +6,11 @@ from sklearn.metrics import classification_report, accuracy_score
 import joblib
 import os
 
-MODEL_PATH = 'trading_model.joblib'
+MODEL_DIR = 'trained_models'
+DEFAULT_MODEL_NAME = 'trading_model.joblib'
 
 class TradingModel:
-    def __init__(self):
+    def __init__(self, symbol=None, interval=None):
         self.model = xgb.XGBClassifier(
             n_estimators=300,
             max_depth=7,
@@ -22,6 +23,16 @@ class TradingModel:
             random_state=42
         )
         self.feature_cols = None
+        self.symbol = symbol
+        self.interval = interval
+
+    def get_model_path(self):
+        if not os.path.exists(MODEL_DIR):
+            os.makedirs(MODEL_DIR)
+            
+        if self.symbol and self.interval:
+            return os.path.join(MODEL_DIR, f"model_{self.symbol}_{self.interval}.joblib")
+        return DEFAULT_MODEL_NAME
 
     def _prepare_data(self, df):
         # Map labels: -1 -> 0, 0 -> 1, 1 -> 2
@@ -55,11 +66,22 @@ class TradingModel:
         X = df[self.feature_cols]
         return self.model.predict_proba(X)
 
-    def save(self, path=MODEL_PATH):
+    def save(self, path=None):
+        if path is None:
+            path = self.get_model_path()
         joblib.dump({'model': self.model, 'feature_cols': self.feature_cols}, path)
         print(f"Model saved to {path}")
 
-    def load(self, path=MODEL_PATH):
+    def load(self, path=None):
+        if path is None:
+            path = self.get_model_path()
+            
+        # Fallback to default if specific model doesn't exist
+        if not os.path.exists(path) and path != DEFAULT_MODEL_NAME:
+            if os.path.exists(DEFAULT_MODEL_NAME):
+                path = DEFAULT_MODEL_NAME
+                print(f"Specific model not found. Falling back to {path}")
+
         if os.path.exists(path):
             data = joblib.load(path)
             self.model = data['model']

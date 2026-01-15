@@ -5,14 +5,17 @@ from journal import Journal
 from options_engine import OptionsEngine
 
 class Backtester:
-    def __init__(self, signals_df, initial_balance=1000.0, options_mode=True, interval='15m', target_dte=0.0):
+    def __init__(self, signals_df, symbol='SPY', initial_balance=1000.0, options_mode=True, interval='15m', target_dte=0.0):
         self.df = signals_df
+        self.symbol = symbol
         self.risk_manager = RiskManager(starting_balance=initial_balance)
-        self.journal = Journal()
+        self.journal = Journal(symbol=symbol, interval=interval)
         self.options_engine = OptionsEngine()
         self.balance = initial_balance
         self.equity_curve = []
         self.options_mode = options_mode
+        self.interval = interval
+        self.target_dte = target_dte if target_dte is not None else 0.0
         self.price_history_buffer = [] # To track spot prices for options simulation
         
     def run(self):
@@ -192,17 +195,8 @@ class Backtester:
         print(summary)
         return pd.DataFrame(self.equity_curve)
 
-    def __init__(self, signals_df, initial_balance=1000.0, options_mode=True, interval='15m', target_dte=0.0):
-        self.df = signals_df
-        self.risk_manager = RiskManager(starting_balance=initial_balance)
-        self.journal = Journal()
-        self.options_engine = OptionsEngine()
-        self.balance = initial_balance
-        self.equity_curve = []
-        self.options_mode = options_mode
-        self.interval = interval
-        self.target_dte = target_dte if target_dte is not None else 0.0
-        self.price_history_buffer = [] 
+
+    # ... (rest of class)
         
     # (run method remains same)
 

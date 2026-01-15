@@ -7,4 +7,5 @@ urlpatterns = [
     path('backtest/', views.run_backtest),
     path('sync/', views.sync_trades),
     path('predict/', views.get_prediction),
+    path('alpaca/account/', views.get_alpaca_account),
 ]

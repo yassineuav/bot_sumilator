@@ -1,12 +1,28 @@
 import pandas as pd
 import numpy as np
+import os
 from datetime import datetime
+JOURNAL_DIR = 'trade_journals'
+DEFAULT_JOURNAL_NAME = 'trade_journal.csv'
 
 class Journal:
-    def __init__(self, filename='trade_journal.csv'):
+    def __init__(self, symbol=None, interval=None, filename=None):
+        self.symbol = symbol
+        self.interval = interval
         self.filename = filename
         self.trades = []
         
+    def get_journal_path(self):
+        if self.filename:
+            return self.filename
+            
+        if not os.path.exists(JOURNAL_DIR):
+            os.makedirs(JOURNAL_DIR)
+            
+        if self.symbol and self.interval:
+            return os.path.join(JOURNAL_DIR, f"journal_{self.symbol}_{self.interval}.csv")
+        return DEFAULT_JOURNAL_NAME
+
     def add_trade(self, trade_data):
         """
         trade_data: dict with trade details
@@ -15,8 +31,9 @@ class Journal:
         
     def save(self):
         df = pd.DataFrame(self.trades)
-        df.to_csv(self.filename, index=False)
-        print(f"Journal saved to {self.filename}")
+        path = self.get_journal_path()
+        df.to_csv(path, index=False)
+        print(f"Journal saved to {path}")
         return df
 
     def get_summary(self):

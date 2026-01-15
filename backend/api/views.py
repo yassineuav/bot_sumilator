@@ -59,7 +59,7 @@ def train_model(request):
             df = patterns.label_data(df)
             
             # Train model
-            tm = model.TradingModel()
+            tm = model.TradingModel(symbol=symbol, interval=interval)
             tm.train(df)
             results[interval] = "Success"
         except Exception as e:
@@ -98,7 +98,7 @@ def run_backtest(request):
         df = features.compute_features(df)
         df = patterns.label_data(df)
         
-        tm = model.TradingModel()
+        tm = model.TradingModel(symbol=symbol, interval=interval)
         if not tm.load():
             tm.train(df)
             
@@ -114,6 +114,7 @@ def run_backtest(request):
             
         bt = backtest.Backtester(
             signals_df, 
+            symbol=symbol,
             initial_balance=initial_balance, 
             interval=interval,
             target_dte=target_dte
@@ -149,9 +150,15 @@ def run_backtest(request):
 @api_view(['POST'])
 def sync_trades(request):
     try:
-        csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'trade_journal.csv')
+        from core.journal import Journal
+        symbol = request.data.get('symbol', 'SPY')
+        interval = request.data.get('interval', '15m')
+        
+        j = Journal(symbol=symbol, interval=interval)
+        csv_path = j.get_journal_path()
+        
         if not os.path.exists(csv_path):
-            return Response({'error': 'No trade details found (trade_journal.csv missing)'}, status=404)
+            return Response({'error': f'No trade details found for {symbol} {interval} ({csv_path} missing)'}, status=404)
             
         df = pd.read_csv(csv_path)
         count = 0
@@ -176,6 +183,9 @@ def sync_trades(request):
         return Response({'status': f'Synced {count} trades'})
     except Exception as e:
         import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=500)
+
 @api_view(['POST'])
 def get_prediction(request):
     try:
@@ -187,9 +197,9 @@ def get_prediction(request):
         take_profit_pct = float(request.data.get('take_profit', 50)) / 100.0
         
         # 1. Load Model
-        tm = model.TradingModel()
+        tm = model.TradingModel(symbol=symbol, interval=interval)
         if not tm.load():
-            return Response({'error': 'Model not found. Please train first.'}, status=400)
+            return Response({'error': f'Model not found for {symbol} {interval}. Please train first.'}, status=400)
             
         # 2. Fetch Data (Need enough for features)
         df = data_loader.fetch_data(symbol, interval=interval, period='60d') # Need context for indicators
@@ -320,4 +330,24 @@ def get_prediction(request):
         
     except Exception as e:
         traceback.print_exc()
+        return Response({'error': str(e)}, status=500)
+@api_view(['GET'])
+def get_alpaca_account(request):
+    try:
+        from core.alpaca_trader import AlpacaTrader
+        trader = AlpacaTrader()
+        account = trader.get_account()
+        if not account:
+            return Response({'error': 'Could not fetch Alpaca account'}, status=500)
+            
+        return Response({
+            'status': account.status,
+            'equity': float(account.equity),
+            'cash': float(account.cash),
+            'buying_power': float(account.buying_power),
+            'currency': account.currency,
+            'pattern_day_trader': account.pattern_day_trader,
+            'daytrade_count': account.daytrade_count
+        })
+    except Exception as e:
         return Response({'error': str(e)}, status=500)

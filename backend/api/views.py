@@ -1,7 +1,7 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Trade, Performance
-from .serializers import TradeSerializer, PerformanceSerializer
+from .models import Trade, Performance, ManualTrade
+from .serializers import TradeSerializer, PerformanceSerializer, ManualTradeSerializer
 import sys
 import os
 import pandas as pd
@@ -349,5 +349,82 @@ def get_alpaca_account(request):
             'pattern_day_trader': account.pattern_day_trader,
             'daytrade_count': account.daytrade_count
         })
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['POST'])
+def run_manual_test(request):
+    try:
+        from core.manual_tester import ManualTester
+        symbol = request.data.get('symbol', 'SPY')
+        interval = request.data.get('interval', '15m')
+        timestamp = request.data.get('timestamp') 
+        
+        if not timestamp:
+            return Response({'error': 'Timestamp is required'}, status=400)
+            
+        tester = ManualTester(symbol, interval)
+        pred = tester.run_prediction_at_time(timestamp)
+        
+        if not pred:
+            return Response({'error': 'Could not run prediction at this time. Check data availability.'}, status=400)
+            
+        # Select OTM Option
+        option_data = tester.select_otm_option(pred['entry_price'], pred['signal'], timestamp)
+        
+        return Response({
+            'prediction': pred,
+            'option': option_data
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['POST'])
+def save_manual_trade(request):
+    try:
+        serializer = ManualTradeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def get_manual_history(request):
+    try:
+        trades = ManualTrade.objects.all().order_by('-created_at')
+        serializer = ManualTradeSerializer(trades, many=True)
+        return Response(serializer.data)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['DELETE'])
+def clear_manual_history(request):
+    try:
+        ManualTrade.objects.all().delete()
+        return Response({'status': 'success', 'message': 'Manual history cleared'})
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def get_history_data(request):
+    try:
+        import data_loader
+        symbol = request.GET.get('symbol', 'SPY')
+        interval = request.GET.get('interval', '15m')
+        period = request.GET.get('period', '60d')
+        
+        df = data_loader.fetch_data(symbol, interval=interval, period=period)
+        if df.empty:
+            return Response({'error': 'No data found'}, status=404)
+            
+        # Add index as timestamp string
+        df_reset = df.reset_index()
+        df_reset['Datetime'] = df_reset['Datetime'].astype(str)
+        
+        return Response(df_reset.to_dict(orient='records'))
     except Exception as e:
         return Response({'error': str(e)}, status=500)

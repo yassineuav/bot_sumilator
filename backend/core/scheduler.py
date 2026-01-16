@@ -90,11 +90,24 @@ def run_auto_trade_cycle(symbol='SPY', interval='15m'):
         print(f"Error in auto-trade cycle: {e}")
         traceback.print_exc()
 
+def check_system_health():
+    print(f"[{datetime.datetime.now()}] Heartbeat: Backend health check...")
+    try:
+        trader = AlpacaTrader()
+        account = trader.get_account()
+        if account:
+            print(f"[{datetime.datetime.now()}] System Status: ONLINE (Alpaca Connected)")
+        else:
+            print(f"[{datetime.datetime.now()}] System Status: WARNING (Alpaca Disconnected)")
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] System Status: ERROR (Health Check Failed: {e})")
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
     # Adding jobs for both 5 and 15 minutes as requested
     scheduler.add_job(run_auto_trade_cycle, 'interval', minutes=15, args=['SPY', '15m'], id='trade_spy_15m')
     scheduler.add_job(run_auto_trade_cycle, 'interval', minutes=5, args=['SPY', '5m'], id='trade_spy_5m')
+    scheduler.add_job(check_system_health, 'interval', seconds=15, id='system_health_check')
     
     scheduler.start()
     print("Background Scheduler Started.")

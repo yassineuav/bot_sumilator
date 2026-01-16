@@ -12,5 +12,7 @@ urlpatterns = [
     path('manual-test/save/', views.save_manual_trade),
     path('manual-test/history/', views.get_manual_history),
     path('manual-test/clear/', views.clear_manual_history),
+    path('manual-test/auto-backtest/', views.run_auto_backtest),
     path('history-data/', views.get_history_data),
+    path('health/', views.health_check),
 ]

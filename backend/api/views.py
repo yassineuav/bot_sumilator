@@ -176,7 +176,7 @@ def sync_trades(request):
                 pnl_val=row.get('pnl_val', 0),
                 pnl_pct=row.get('pnl_pct', 0),
                 confidence=row.get('confidence', 0),
-                reason=row.get('exit_reason', '')
+                exit_reason=row.get('exit_reason', '')
             )
             count += 1
             
@@ -195,6 +195,8 @@ def get_prediction(request):
         interval = request.data.get('interval', '15m')
         stop_loss_pct = float(request.data.get('stop_loss', 10)) / 100.0
         take_profit_pct = float(request.data.get('take_profit', 50)) / 100.0
+        bullish_threshold = float(request.data.get('bullish_threshold', 70)) / 100.0
+        bearish_threshold = float(request.data.get('bearish_threshold', 70)) / 100.0
         
         # 1. Load Model
         tm = model.TradingModel(symbol=symbol, interval=interval)
@@ -241,11 +243,20 @@ def get_prediction(request):
         # Get Probabilities
         probs = tm.predict_proba(current_data)[0] # [Bearish, Neutral, Bullish]
         
-        # Determine Signal (Simple Argmax for now, or threshold)
-        pred_idx = np.argmax(probs)
-        signal_map = {0: 'PUT', 1: 'NEUTRAL', 2: 'CALL'}
-        signal = signal_map[pred_idx]
-        confidence = float(probs[pred_idx])
+        # Determine Signal based on thresholds
+        # probs[0] = Bearish, probs[1] = Neutral, probs[2] = Bullish
+        bearish_conf = float(probs[0])
+        bullish_conf = float(probs[2])
+        
+        if bullish_conf >= bullish_threshold:
+            signal = 'CALL'
+            confidence = bullish_conf
+        elif bearish_conf >= bearish_threshold:
+            signal = 'PUT'
+            confidence = bearish_conf
+        else:
+            signal = 'NEUTRAL'
+            confidence = float(probs[1]) # Neutral confidence
         
         # 4. Calculate Levels
         entry_price = float(current_data['Close'].iloc[0])
@@ -409,6 +420,161 @@ def clear_manual_history(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+@api_view(['POST'])
+def run_auto_backtest(request):
+    try:
+        from core.manual_tester import ManualTester
+        symbol = request.data.get('symbol', 'SPY')
+        interval = request.data.get('interval', '15m')
+        start_timestamp = request.data.get('timestamp')
+        
+        risk_pct = float(request.data.get('risk_pct', 10))
+        stop_loss_pct = float(request.data.get('stop_loss_pct', 50))
+        take_profit_pct = float(request.data.get('take_profit_pct', 200))
+        position_size = float(request.data.get('position_size', 20))
+
+        if not start_timestamp:
+            return Response({'error': 'Start timestamp is required'}, status=400)
+
+        # 1. Fetch data
+        import data_loader
+        df = data_loader.fetch_data(symbol, interval=interval, period='60d')
+        if df.empty:
+            return Response({'error': 'No data found'}, status=400)
+
+        df['Datetime'] = pd.to_datetime(df['Datetime'])
+        ts_start = pd.to_datetime(start_timestamp)
+        
+        # Sync timezone
+        if df['Datetime'].dt.tz is not None and ts_start.tzinfo is None:
+            ts_start = ts_start.tz_localize('UTC').tz_convert(df['Datetime'].dt.tz)
+        elif df['Datetime'].dt.tz is None and ts_start.tzinfo is not None:
+            ts_start = ts_start.replace(tzinfo=None)
+
+        # Get data from start_timestamp onwards
+        df_backtest = df[df['Datetime'] >= ts_start].copy()
+        if len(df_backtest) < 2:
+            return Response({'error': 'Not enough data for backtest from this point.'}, status=400)
+
+        # 2. Generate signals for the entire period
+        import features
+        import model
+        import signals
+        
+        tm = model.TradingModel(symbol=symbol, interval=interval)
+        if not tm.load():
+            # If no model, try training on full data (or just error out if we expect it to exist)
+            df_full = features.compute_features(df)
+            import patterns
+            df_full = patterns.label_data(df_full)
+            tm.train(df_full)
+        
+        df_all_features = features.compute_features(df)
+        signals_df = signals.generate_signals(df_all_features, tm)
+        
+        # Filter signals to match our backtest period
+        signals_df = signals_df[signals_df['Datetime'] >= ts_start].copy()
+
+        # 3. Simplified Backtest Loop
+        active_trade = None
+        trades_saved = 0
+        
+        # Options Simulation Constants
+        r = 0.05
+        sigma = 0.20
+        initial_hours_left = 12.0
+        
+        # Determine time sub per step
+        intervals_per_day = {'1m': 390, '5m': 78, '15m': 26, '30m': 13, '1h': 7, '1d': 1}
+        steps_per_day = intervals_per_day.get(interval, 26)
+        minutes_per_step = 390 / steps_per_day if interval != '1d' else 390
+        
+        from core.options_engine import OptionsEngine
+        opt_engine = OptionsEngine()
+        tester = ManualTester(symbol, interval)
+
+        for i in range(len(signals_df)):
+            row = signals_df.iloc[i]
+            
+            # Check for exits if trade is active
+            if active_trade:
+                steps_elapsed = i - active_trade['entry_index']
+                current_hours_left = max(0, initial_hours_left - (steps_elapsed * minutes_per_step / 60))
+                T = current_hours_left / (24 * 365)
+                
+                res = opt_engine.black_scholes(
+                    S=row['Close'],
+                    K=active_trade['option_strike'],
+                    T=T,
+                    r=r,
+                    sigma=sigma,
+                    option_type=active_trade['option_type'].lower()
+                )
+                
+                curr_premium = res['price']
+                
+                result = None
+                if curr_premium >= active_trade['tp_price']:
+                    result = 'TP'
+                elif curr_premium <= active_trade['sl_price']:
+                    result = 'SL'
+                elif i == len(signals_df) - 1:
+                    result = 'Expired'
+                
+                if result:
+                    # Finalize and Save
+                    pnl_pct = (curr_premium - active_trade['option_premium']) / active_trade['option_premium']
+                    # Mock balance for pnl_val (or just use 1000 as base)
+                    pnl_val = (active_trade['position_size'] / 100.0 * 1000.0) * pnl_pct
+                    
+                    ManualTrade.objects.create(
+                        symbol=symbol,
+                        timestamp=active_trade['timestamp'],
+                        prediction=active_trade['prediction'],
+                        confidence=active_trade['confidence'],
+                        option_strike=active_trade['option_strike'],
+                        option_premium=active_trade['option_premium'],
+                        option_type=active_trade['option_type'],
+                        entry_price=active_trade['entry_price'],
+                        take_profit=active_trade['tp_price'],
+                        stop_loss=active_trade['sl_price'],
+                        position_size=active_trade['position_size'],
+                        result=result,
+                        pnl_pct=pnl_pct * 100,
+                        pnl_val=pnl_val
+                    )
+                    trades_saved += 1
+                    active_trade = None
+
+            # Check for entries if no active trade
+            if not active_trade and row['signal'] in ['CALL', 'PUT']:
+                # Select OTM option
+                opt_data = tester.select_otm_option(row['Close'], row['signal'], row['Datetime'])
+                if opt_data:
+                    active_trade = {
+                        'entry_index': i,
+                        'timestamp': row['Datetime'],
+                        'prediction': row['signal'],
+                        'confidence': row['confidence'],
+                        'option_strike': opt_data['strike'],
+                        'option_premium': opt_data['premium'],
+                        'option_type': row['signal'],
+                        'entry_price': row['Close'],
+                        'tp_price': opt_data['premium'] * (1 + take_profit_pct / 100),
+                        'sl_price': opt_data['premium'] * (1 - stop_loss_pct / 100),
+                        'position_size': position_size
+                    }
+
+        return Response({
+            'status': 'success',
+            'trades_processed': trades_saved,
+            'message': f'Auto-backtest complete. Saved {trades_saved} trades to journal.'
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=500)
+
 @api_view(['GET'])
 def get_history_data(request):
     try:
@@ -428,3 +594,6 @@ def get_history_data(request):
         return Response(df_reset.to_dict(orient='records'))
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+@api_view(['GET'])
+def health_check(request):
+    return Response({'status': 'ok', 'message': 'Backend is online'})

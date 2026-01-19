@@ -13,6 +13,7 @@ export default function Dashboard() {
     performance: [],
     equity_curve: []
   });
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [predicting, setPredicting] = useState(false);
@@ -26,7 +27,6 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     setLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     try {
       const res = await fetch(`${apiUrl}/api/dashboard/`);
       const json = await res.json();

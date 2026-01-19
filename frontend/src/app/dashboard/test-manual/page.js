@@ -56,6 +56,7 @@ export default function TestManual() {
         interval: '15m',
         period: '60d'
     });
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
     const [historyData, setHistoryData] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -99,7 +100,6 @@ export default function TestManual() {
 
     const fetchHistoryData = async () => {
         setLoading(true);
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
         try {
             const res = await fetch(`${apiUrl}/api/history-data/?symbol=${config.symbol}&interval=${config.interval}&period=${config.period}`);
             const data = await res.json();

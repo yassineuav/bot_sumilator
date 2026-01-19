@@ -146,6 +146,7 @@ export default function RiskManagement() {
     });
 
     const [prediction, setPrediction] = useState(null);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
     const timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
     const [timeframe, setTimeframe] = useState('15m');
@@ -163,7 +164,6 @@ export default function RiskManagement() {
 
     const trainCurrentModel = async () => {
         setTrainingStatus('Training...');
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
         try {
             const res = await fetch(`${apiUrl}/api/train/`, {
                 method: 'POST',

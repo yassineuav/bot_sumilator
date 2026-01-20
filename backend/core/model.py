@@ -6,8 +6,8 @@ from sklearn.metrics import classification_report, accuracy_score
 import joblib
 import os
 
-MODEL_DIR = 'trained_models'
-DEFAULT_MODEL_NAME = 'trading_model.joblib'
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'trained_models')
+DEFAULT_MODEL_NAME = os.path.join(MODEL_DIR, 'trading_model.joblib')
 
 class TradingModel:
     def __init__(self, symbol=None, interval=None):

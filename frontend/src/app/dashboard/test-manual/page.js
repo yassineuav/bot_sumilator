@@ -55,7 +55,10 @@ export default function TestManual() {
     const [config, setConfig] = useState({
         symbol: 'SPY',
         interval: '15m',
-        period: '60d'
+        symbol: 'SPY',
+        interval: '15m',
+        period: '60d',
+        model_type: 'xgb'
     });
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -155,7 +158,8 @@ export default function TestManual() {
                 body: JSON.stringify({
                     symbol: config.symbol,
                     interval: config.interval,
-                    timestamp: currentPoint.Datetime
+                    timestamp: currentPoint.Datetime,
+                    model_type: config.model_type
                 })
             });
             const data = await res.json();
@@ -374,6 +378,18 @@ export default function TestManual() {
                                 className={`px-3 md:px-4 py-1.5 rounded-md text-[10px] md:text-xs font-bold transition-all whitespace-nowrap ${config.interval === tf ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
                             >
                                 {tf}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flex bg-muted p-1 rounded-lg border">
+                        {['xgb', 'lstm', 'hybrid'].map(m => (
+                            <button
+                                key={m}
+                                onClick={() => setConfig(prev => ({ ...prev, model_type: m }))}
+                                className={`px-3 md:px-4 py-1.5 rounded-md text-[10px] md:text-xs font-bold transition-all uppercase ${config.model_type === m ? 'bg-background shadow-sm text-indigo-500' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                                {m}
                             </button>
                         ))}
                     </div>

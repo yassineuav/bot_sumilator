@@ -13,25 +13,64 @@ import model
 from options_engine import OptionsEngine
 
 class ManualTester:
-    def __init__(self, symbol, interval):
+    def __init__(self, symbol, interval, model_type='xgb'):
         self.symbol = symbol
         self.interval = interval
+        self.model_type = model_type
         self.options_engine = OptionsEngine()
-        self.tm = model.TradingModel(symbol=symbol, interval=interval)
+        
+        # Load appropriate model
+        if model_type == 'lstm':
+            from core.lstm_model import LSTMModel
+            self.tm = LSTMModel(symbol=symbol, interval=interval)
+        elif model_type == 'hybrid':
+            from core.hybrid_model import HybridModel
+            self.tm = HybridModel(symbol=symbol, interval=interval)
+        else:
+            # Default to XGBoost
+            self.tm = model.TradingModel(symbol=symbol, interval=interval)
+            
         self.tm.load()
 
     def run_prediction_at_time(self, timestamp):
         """
         Runs the predictor on historical data up to the given timestamp.
         """
-        # 1. Fetch data with buffer to allow for feature computation
-        # 60 days is usually enough for all our indicators
-        df = data_loader.fetch_data(self.symbol, interval=self.interval, period='60d')
+        # 1. Fetch data using Pipeline (handles Multi-Timeframe features)
+        from core.feature_pipeline import MultiTimeframePipeline
+        
+        # Determine period logic similar to views.py
+        if self.interval == '1d':
+            period = '10y'
+        elif self.interval in ['1h', '90m']:
+            period = '730d'
+        else:
+            period = '60d'
+            
+        pipeline = MultiTimeframePipeline(self.symbol)
+        try:
+            # prepare_multitimeframe_data fetches and computes ALL features
+            df = pipeline.prepare_multitimeframe_data(base_interval=self.interval, base_period=period)
+        except Exception as e:
+            print(f"ManualTester Pipeline Error: {e}")
+            return None
+
         if df.empty:
             return None
 
         # 2. Filter data up to the selected timestamp
         # Ensure Datetime column is datetime objects
+        # MultiTimeframePipeline returns DF with Datetime Index? 
+        # Let's check: prepare_multitimeframe_data returns base_df which might be indexed by Datetime.
+        # We need 'Datetime' as a column for filtering logic below or reset it.
+        
+        if 'Datetime' not in df.columns:
+            df = df.reset_index()
+            # If still missing, try rename
+            if 'Datetime' not in df.columns:
+                 if df.columns[0].lower() in ['date', 'datetime', 'index']:
+                     df.rename(columns={df.columns[0]: 'Datetime'}, inplace=True)
+        
         df['Datetime'] = pd.to_datetime(df['Datetime'])
         ts = pd.to_datetime(timestamp)
         
@@ -47,10 +86,8 @@ class ManualTester:
         if df_filtered.empty:
             return None
 
-        # 3. Compute features
-        df_features = features.compute_features(df_filtered)
-        if df_features.empty:
-            return None
+        # 3. Features already computed by Pipeline
+        df_features = df_filtered
 
         # 4. Predict on the last available candle (which is exactly at or before our timestamp)
         current_data = df_features.iloc[[-1]].copy()
@@ -103,33 +140,44 @@ class ManualTester:
         
         found_option = None
         
+        # 2. Iterate to find best strike in range
         for offset in offsets:
             strike = base_strike + offset if signal == 'CALL' else base_strike - offset
+            
+            # Filter unrealistic strikes (e.g. negative)
+            if strike <= 0: continue
+            
             res = self.options_engine.black_scholes(
                 S=spot_price, K=strike, T=T, r=r, sigma=vol, option_type=option_type
             )
             price = res['price']
             
-            if 0.10 <= price <= 0.35:
+            # Logic: Match desired price range ($0.10 - $0.50 for cheap/lotto options)
+            # OR just return the first one that is "Reasonable" OTM
+            
+            if 0.10 <= price <= 0.60:
                 found_option = {
                     'strike': strike,
                     'premium': round(price, 2),
                     'type': signal,
-                    'expiry': 'Next Available', # Abstracted for simulation
-                    'delta': res['delta']
+                    'expiry': '0DTE (Simulated)', 
+                    'delta': res['delta'],
+                    'theta': res['theta_daily']
                 }
                 break
         
-        # Fallback if range not found (take closest)
+        # Fallback: Just take offset 3 ( ~$2-$3 OTM usually)
         if not found_option:
              strike = base_strike + 3 if signal == 'CALL' else base_strike - 3
-             res = self.options_engine.black_scholes(S=spot_price, K=strike, T=T, r=r, sigma=vol, option_type=option_type)
-             found_option = {
-                'strike': strike,
-                'premium': round(res['price'], 2),
-                'type': signal,
-                'expiry': 'Next Available',
-                'delta': res['delta']
-            }
+             if strike > 0:
+                 res = self.options_engine.black_scholes(S=spot_price, K=strike, T=T, r=r, sigma=vol, option_type=option_type)
+                 found_option = {
+                    'strike': strike,
+                    'premium': round(res['price'], 2),
+                    'type': signal,
+                    'expiry': '0DTE (Simulated)',
+                    'delta': res['delta'],
+                    'theta': res['theta_daily']
+                }
 
         return found_option

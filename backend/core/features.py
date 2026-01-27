@@ -43,6 +43,7 @@ def compute_features(df):
     # Distance from MAs
     df['dist_ma20'] = (df['Close'] - df['ma20']) / df['ma20']
     df['dist_ma50'] = (df['Close'] - df['ma50']) / df['ma50']
+    df['dist_ma200'] = (df['Close'] - df['ma200']) / df['ma200']
     
     # 6. Trend Strength (ADX)
     adx = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=14)
@@ -54,6 +55,48 @@ def compute_features(df):
     df['higher_high'] = (df['High'] > df['High'].shift(1)).astype(int)
     df['lower_low'] = (df['Low'] < df['Low'].shift(1)).astype(int)
     
+    # 8. New Cascade Features
+    
+    # 8.1 VWAP (Volume Weighted Average Price)
+    # ta.volume.VolumeWeightedAveragePrice requires High, Low, Close, Volume
+    if 'Volume' in df.columns:
+        vwap_ind = ta.volume.VolumeWeightedAveragePrice(
+            high=df['High'], low=df['Low'], close=df['Close'], volume=df['Volume'], window=14
+        )
+        df['vwap'] = vwap_ind.volume_weighted_average_price()
+        # Deviation
+        df['vwap_dist'] = (df['Close'] - df['vwap']) / df['vwap']
+        
+        # 8.2 Volume Delta (Approximate)
+        # Proxy: If Close > Open, assign volume to Buy. Else Sell.
+        # Ideally use tick data, but OHLCV proxy:
+        # We need "Buy Vol" and "Sell Vol" for the ratio feature.
+        # Let's assume:
+        # BuyVol = Volume * (Close - Low) / (High - Low)
+        # SellVol = Volume * (High - Close) / (High - Low)
+        # This is "Buying Pressure" vs "Selling Pressure" proxy (Williams %R logic approx)
+        
+        # Prevent division by zero
+        hl_range = df['High'] - df['Low']
+        hl_range = hl_range.replace(0, 1e-9)
+        
+        df['buy_vol_proxy'] = df['Volume'] * ((df['Close'] - df['Low']) / hl_range)
+        df['sell_vol_proxy'] = df['Volume'] * ((df['High'] - df['Close']) / hl_range)
+        
+        # Volume Delta: (Buy - Sell) / Total
+        df['vol_delta'] = (df['buy_vol_proxy'] - df['sell_vol_proxy']) / df['Volume']
+        df['vol_delta'] = df['vol_delta'].fillna(0)
+    
+    # 8.3 Volatility Regime
+    # ATR / SMA(20)
+    if 'atr' not in df.columns:
+        df['atr'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
+    
+    if 'ma20' not in df.columns:
+        df['ma20'] = ta.trend.sma_indicator(df['Close'], window=20)
+        
+    df['volatility_regime'] = df['atr'] / df['ma20']
+
     # Clean up NaNs created by indicators
     df = df.dropna()
     

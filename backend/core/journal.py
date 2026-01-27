@@ -6,21 +6,23 @@ JOURNAL_DIR = 'trade_journals'
 DEFAULT_JOURNAL_NAME = 'trade_journal.csv'
 
 class Journal:
-    def __init__(self, symbol=None, interval=None, filename=None):
+    def __init__(self, symbol=None, interval=None, filename=None, project_name='default'):
         self.symbol = symbol
         self.interval = interval
         self.filename = filename
+        self.project_name = project_name
         self.trades = []
         
     def get_journal_path(self):
         if self.filename:
             return self.filename
             
-        if not os.path.exists(JOURNAL_DIR):
-            os.makedirs(JOURNAL_DIR)
+        base_dir = os.path.join(JOURNAL_DIR, self.project_name)
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
             
         if self.symbol and self.interval:
-            return os.path.join(JOURNAL_DIR, f"journal_{self.symbol}_{self.interval}.csv")
+            return os.path.join(base_dir, f"journal_{self.symbol}_{self.interval}.csv")
         return DEFAULT_JOURNAL_NAME
 
     def add_trade(self, trade_data):

@@ -1,6 +1,11 @@
 import yfinance as yf
 import pandas as pd
 import os
+import time
+
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
 
 def fetch_data(symbol, interval='5m', period='60d'):
     """
@@ -12,8 +17,35 @@ def fetch_data(symbol, interval='5m', period='60d'):
         period = '7d'
         
     print(f"Fetching data for {symbol} with interval {interval} and period {period}...")
+    
+    # Check Cache
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_{interval}_{period}.pkl")
+    use_cache = False
+    if os.path.exists(cache_file):
+        # Check age (e.g. 15 minutes cache for intraday, 4 hours for daily)
+        mtime = os.path.getmtime(cache_file)
+        age = time.time() - mtime
+        
+        limit = 15 * 60 # Default 15 mins
+        if interval in ['1d', '1wk']:
+            limit = 4 * 3600 # 4 hours
+            
+        if age < limit:
+            print(f"Loading from cache ({age/60:.1f}m old)...")
+            try:
+                return pd.read_pickle(cache_file)
+            except:
+                pass # Corrupt cache
+
     ticker = yf.Ticker(symbol)
     data = ticker.history(period=period, interval=interval)
+    
+    # Save Cache
+    if not data.empty:
+        try:
+            data.to_pickle(cache_file)
+        except Exception as e:
+            print(f"Failed to cache data: {e}")
     
     if data.empty:
         print(f"No data found for {symbol}.")

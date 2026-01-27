@@ -15,6 +15,8 @@ import model
 import signals
 from core.alpaca_trader import AlpacaTrader
 
+import feature_pipeline
+
 def run_auto_trade_cycle(symbol='SPY', interval='15m'):
     trader = AlpacaTrader()
     clock = trader.get_clock()
@@ -35,14 +37,16 @@ def run_auto_trade_cycle(symbol='SPY', interval='15m'):
 
         # 2. Fetch Data
         # We need enough data for features
-        df = data_loader.fetch_data(symbol, interval=interval, period='60d')
-        if df.empty:
-            print("No data found. Skipping.")
+        # Use MultiTimeframePipeline to ensure we have 1d, 1h, and base features
+        pipeline = feature_pipeline.MultiTimeframePipeline(symbol)
+        try:
+            df = pipeline.prepare_multitimeframe_data(base_interval=interval, base_period='60d')
+        except Exception as e:
+            print(f"Error fetching/preparing data: {e}")
             return
-            
-        df = features.compute_features(df)
+
         if df.empty:
-            print("No data after features. Skipping.")
+            print("No data found (empty dataframe). Skipping.")
             return
             
         # 3. Predict on most recent candle
@@ -104,11 +108,12 @@ def check_system_health():
         # Only log heartbeat if market is open, as requested
         if clock and clock.is_open:
             print(f"[{datetime.datetime.now()}] Heartbeat: Backend health check...")
-            account = trader.get_account()
-            if account:
-                print(f"[{datetime.datetime.now()}] System Status: ONLINE (Alpaca Connected)")
-            else:
-                print(f"[{datetime.datetime.now()}] System Status: WARNING (Alpaca Disconnected)")
+            # System status log moved to on-demand (views.py) per user request
+            # account = trader.get_account()
+            # if account:
+            #     print(f"[{datetime.datetime.now()}] System Status: ONLINE (Alpaca Connected)")
+            # else:
+            #     print(f"[{datetime.datetime.now()}] System Status: WARNING (Alpaca Disconnected)")
         # Else: Market closed, stay silent
     except Exception as e:
         # Only log errors if we really need to, keeping silent for now to satisfy request
@@ -119,7 +124,7 @@ def start_scheduler():
     # Adding jobs for both 5 and 15 minutes as requested
     scheduler.add_job(run_auto_trade_cycle, 'interval', minutes=15, args=['SPY', '15m'], id='trade_spy_15m')
     scheduler.add_job(run_auto_trade_cycle, 'interval', minutes=5, args=['SPY', '5m'], id='trade_spy_5m')
-    scheduler.add_job(check_system_health, 'interval', seconds=15, id='system_health_check')
+    scheduler.add_job(check_system_health, 'interval', minutes=1, id='system_health_check')
     
     scheduler.start()
     print("Background Scheduler Started.")

@@ -4,12 +4,19 @@ from risk import RiskManager
 from journal import Journal
 from options_engine import OptionsEngine
 
+
 class Backtester:
-    def __init__(self, signals_df, symbol='SPY', initial_balance=1000.0, options_mode=True, interval='15m', target_dte=0.0):
+    def __init__(self, signals_df, symbol='SPY', initial_balance=1000.0, options_mode=True, interval='15m', target_dte=0.0,
+                 risk_per_trade_pct=0.20, stop_loss_pct=0.10, take_profit_pct=0.50, project_name='default'):
         self.df = signals_df
         self.symbol = symbol
-        self.risk_manager = RiskManager(starting_balance=initial_balance)
-        self.journal = Journal(symbol=symbol, interval=interval)
+        self.risk_manager = RiskManager(
+            starting_balance=initial_balance,
+            risk_per_trade_pct=risk_per_trade_pct,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct
+        )
+        self.journal = Journal(symbol=symbol, interval=interval, project_name=project_name)
         self.options_engine = OptionsEngine()
         self.balance = initial_balance
         self.equity_curve = []
@@ -73,20 +80,55 @@ class Backtester:
                     else:
                         dynamic_vol = 0.15
 
-                    contract_prices = self.options_engine.simulate_contract_price(
-                        trade['price_history'],
-                        strike_pct=1.005 if trade['type'] == 'CALL' else 0.995,
-                        dte=eff_dte,
-                        initial_vol=dynamic_vol,
-                        steps_per_day=steps
-                    )
+                    # STRIKE: Use stored strike
+                    strike = trade.get('strike')
+                    if strike is None:
+                         # Fallback for old trades (shouldn't happen in new runs)
+                         offset = 2.5
+                         if trade['type'] == 'CALL':
+                              strike = round(trade['entry_price'] - offset)
+                         else:
+                              strike = round(trade['entry_price'] + offset)
                     
-                    # Clamp Minimum Option Price to $0.10 to prevent unrealistic % gains from penny options
-                    entry_opt = max(0.10, contract_prices[0])
-                    # We must also clamp the current price if we want consistent PnL logic, 
-                    # but actually we just care that the ENTRY wasn't unrealistically cheap.
-                    # The exit price depends on the market.
-                    curr_opt = contract_prices[-1]
+                    strike_pct = strike / trade['entry_price']
+
+                    
+                    # OPTIMIZATION: Calculate only current option price
+                    duration_steps = len(trade['price_history']) - 1
+                    current_dte = eff_dte - (duration_steps / float(steps))
+                    T = max(0, current_dte / 365.0)
+                    
+                    # Option Type
+                    # If strike was derived from strike_pct logic earlier, we need to know call/put
+                    # trade['type'] has 'CALL'/'PUT'
+                    opt_type = 'call' if trade['type'] == 'CALL' else 'put'
+                    
+                    # Current Option Price
+                    res = self.options_engine.black_scholes(
+                        S=row['Close'],
+                        K=strike,
+                        T=T,
+                        r=0.05,
+                        sigma=dynamic_vol,
+                        option_type=opt_type
+                    )
+                    curr_opt = res['price']
+                    
+                    # Entry Option Price
+                    # Should be stored in trade! If not (legacy), calculate it once
+                    if 'entry_opt_price' not in trade:
+                        # Back-calculate entry price (T=eff_dte, S=entry_price)
+                        res_entry = self.options_engine.black_scholes(
+                            S=trade['entry_price'],
+                            K=strike,
+                            T=eff_dte/365.0,
+                            r=0.05,
+                            sigma=initial_vol_at_entry if 'initial_vol' in trade else dynamic_vol, # Simplified
+                            option_type=opt_type
+                        )
+                        trade['entry_opt_price'] = max(0.10, res_entry['price'])
+                        
+                    entry_opt = trade['entry_opt_price']
                     
                     pnl_pct = (curr_opt - entry_opt) / entry_opt
                 else:
@@ -98,18 +140,21 @@ class Backtester:
                 trade['unrealized_pnl_val'] = trade['size'] * pnl_pct
                 
                 # Check Exit Conditions
-                # DEFAULT EXIT: Use RiskManager for Stop Loss (pct)
-                # PROFIT TARGET: User wants to sell at $0.40 or more
+                # Use RiskManager for Stop Loss (pct) and Take Profit (pct)
+                # We calculate PnL manually for options above, so we skip check_exit_conditions PnL calc.
+                
+                # Wait, RiskManager.check_exit_conditions(entry, current, type) calculates PnL based on Underlying logic!
+                # If we are in Options Mode, pnl_pct is Option PnL. 
+                # We should probably bypass check_exit_conditions PnL calc and just check the thresholds logic.
+                
+                # Implementing fix inline here to avoid changing RiskManager signature too much or confusing it.
                 should_exit = False
-                reason = "Target"
+                reason = ""
                 
                 if pnl_pct <= -self.risk_manager.stop_loss_pct:
                     should_exit, reason = True, "Stop Loss"
-                elif self.options_mode and curr_opt >= 0.40:
-                    should_exit, reason = True, "Price Target ($0.40)"
-                elif pnl_pct >= self.risk_manager.tp_stages[0][0]:
-                     # Fallback to percentage TP if reached before price target
-                    should_exit, reason = True, "Take Profit (%)"
+                elif pnl_pct >= self.risk_manager.take_profit_pct:
+                    should_exit, reason = True, f"Take Profit ({self.risk_manager.take_profit_pct*100:.0f}%)"
                     
                 if should_exit:
                     exit_val = trade['size'] * (1 + pnl_pct)
@@ -125,7 +170,8 @@ class Backtester:
                         'pnl_pct': pnl_pct,
                         'pnl_val': pnl_val,
                         'exit_reason': reason,
-                        'confidence': trade['confidence']
+                        'confidence': trade['confidence'],
+                        'strike': trade.get('strike')
                     }
                     self.journal.add_trade(trade_record)
                     active_trades.remove(trade)
@@ -152,10 +198,21 @@ class Backtester:
                     else:
                         vol = 0.25
                         
-                    # STRIKE: Out of money strik price option by 2 or 3$ far.
-                    # For a $600 stock, $3 is 0.5%. Using 0.005 offset.
-                    strike_pct = 1.005 if row['signal'] == 'CALL' else 0.995
-                    strike = row['Close'] * strike_pct
+                    # STRIKE SELECTION (ITM 0DTE)
+                    # User Request: Strike $1 to $4 ITM (In The Money)
+                    # For CALL: Strike < Price (Price - 2.5)
+                    # For PUT: Strike > Price (Price + 2.5)
+                    offset = 2.5 # Midpoint of $1-$4
+                    
+                    if row['signal'] == 'CALL':
+                        # Strike below price (ITM)
+                        raw_strike = row['Close'] - offset
+                        strike = round(raw_strike) # Round to nearest integer strike
+                    else:
+                        # Strike above price (ITM)
+                        raw_strike = row['Close'] + offset
+                        strike = round(raw_strike)
+
                     dte_days = max(0.4, self.target_dte)
                     T = dte_days / 365.0
                     
@@ -169,11 +226,15 @@ class Backtester:
                     )
                     entry_option_price = res['price']
                     
-                    # THE FILTER ($0.1 to $0.3)
-                    if not (0.10 <= entry_option_price <= 0.30):
-                        check_price = False
-                
-                if check_price:
+                    
+                    # PRICE FILTER REMOVED for ITM Strategy
+                    # ITM options will be expensive (Intrinsic > $2.5), so we cannot use the cheap option filter.
+                    # if not (0.10 <= entry_option_price <= 0.30):
+                    #     check_price = False
+                    
+                    if entry_option_price <= 0.05:
+                        check_price = False # Still filter out garbage/untradeable
+
                     size = self.risk_manager.calculate_position_size(self.balance)
                     if size > 10:
                         new_trade = {
@@ -181,8 +242,10 @@ class Backtester:
                             'type': row['signal'],
                             'entry_price': row['Close'],
                             'size': size,
+                            'strike': strike, # STORE STRIKE
                             'confidence': row['confidence'],
                             'unrealized_pnl_val': 0,
+                            'entry_opt_price': max(0.10, entry_option_price), # STORE ENTRY OPT PRICE
                             'price_history': [row['Close']]
                         }
                         active_trades.append(new_trade)
@@ -207,7 +270,24 @@ class Backtester:
         """
         Helper to get the current option PnL.
         """
-        strike_pct = 1.005 if active_trade['type'] == 'CALL' else 0.995
+        # Reproduce Strike Selection (ITM $2.5)
+        # We need the ENTRY PRICE of the stock to reconstruct the strike?
+        # active_trade['entry_price'] stores the Stock Price at entry.
+        if 'strike' in active_trade:
+             strike = active_trade['strike']
+             strike_pct = strike / active_trade['entry_price']
+        else:
+             # Fallback
+             offset = 2.5
+             if active_trade['type'] == 'CALL':
+                  strike = round(active_trade['entry_price'] - offset)
+             else:
+                  strike = round(active_trade['entry_price'] + offset)
+             strike_pct = strike / active_trade['entry_price']
+             
+        # NOTE: limit_strike_pct logic in options_engine rely on pct usually? 
+        # But simulate_contract_price takes strike_pct.
+        # Let's use the explicit calculated pct.
         
         # Determine steps per day based on interval
         steps_map = {

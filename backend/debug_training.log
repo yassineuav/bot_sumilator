@@ -1,0 +1,77 @@
+Starting training for SPY 5m 1mo
+Data fetched: 1444 rows
+LSTM Training Error: 'LSTMModel' object has no attribute 'train'
+Traceback (most recent call last):
+  File "C:\Users\khaid\Desktop\train\backend\api\views.py", line 852, in run_training
+    lstm.train(df, epochs=epochs, batch_size=batch_size)
+    ^^^^^^^^^^
+AttributeError: 'LSTMModel' object has no attribute 'train'
+Starting training for SPY 5m 1mo
+Data fetched: 1444 rows
+Training finished and model saved.
+Starting training for SPY 15m 2y
+Data fetched: 0 rows
+No data for LSTM training
+Starting training for SPY 5m 59d
+Data fetched: 4526 rows
+Starting training for SPY 5m 59d
+Data fetched: 4526 rows
+Starting training for SPY 5m 59d
+Data fetched: 4526 rows
+Training finished and model saved.
+Training finished and model saved.
+Training finished and model saved.
+Starting training for SPY 1h 2y
+Data fetched: 3483 rows
+Training finished and model saved.
+Starting training for SPY 15m 59d
+Data fetched: 1510 rows
+Starting training for SPY 15m 59d
+Data fetched: 1510 rows
+Training finished and model saved.
+Training finished and model saved.
+Starting training for SPY 15m 59d
+Data fetched: 1510 rows
+Training finished and model saved.
+Starting training for SPY 1h 2y
+Data fetched: 3483 rows
+Training finished and model saved.
+Starting training for SPY 15m 59d
+Data fetched: 1510 rows
+Training finished and model saved.
+
+[2026-01-23 20:32:54.917099] Starting MTF training for SPY 15m
+MTF Training Error: 'Index' object has no attribute 'date'
+Traceback (most recent call last):
+  File "C:\Users\khaid\Desktop\train\backend\api\views.py", line 904, in run_mtf_training
+    df = pipeline.prepare_multitimeframe_data(base_interval=interval, base_period=period)
+  File "C:\Users\khaid\Desktop\train\backend\core\feature_pipeline.py", line 98, in prepare_multitimeframe_data
+    df_1d['date_key'] = df_1d.index.date
+                        ^^^^^^^^^^^^^^^^
+AttributeError: 'Index' object has no attribute 'date'
+
+[2026-01-23 20:34:42.438768] Starting MTF training for SPY 15m
+MTF Training Error: 'Index' object has no attribute 'date'
+Traceback (most recent call last):
+  File "C:\Users\khaid\Desktop\train\backend\api\views.py", line 904, in run_mtf_training
+    df = pipeline.prepare_multitimeframe_data(base_interval=interval, base_period=period)
+  File "C:\Users\khaid\Desktop\train\backend\core\feature_pipeline.py", line 98, in prepare_multitimeframe_data
+    df_1d['date_key'] = df_1d.index.date
+                        ^^^^^^^^^^^^^^^^
+AttributeError: 'Index' object has no attribute 'date'
+
+[2026-01-23 20:37:39.818814] Starting MTF training for SPY 15m
+MTF Data prepared. Shape: (1337, 81)
+MTF Training finished for SPY 15m.
+
+[2026-01-23 20:44:31.886549] Starting MTF training for SPY 15m
+MTF Data prepared. Shape: (1337, 81)
+MTF Training finished for SPY 15m.
+
+[2026-01-25 18:12:34.594174] Starting MTF training for SPY 15m
+MTF Data prepared. Shape: (1337, 81)
+MTF Training finished for SPY 15m.
+
+[2026-01-25 18:18:46.827214] Starting MTF training for SPY 15m
+MTF Data prepared. Shape: (1337, 81)
+MTF Training finished for SPY 15m.

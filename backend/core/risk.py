@@ -1,13 +1,13 @@
 class RiskManager:
-    def __init__(self, starting_balance=1000.0, risk_per_trade_pct=0.20):
+    def __init__(self, starting_balance=1000.0, risk_per_trade_pct=0.20, stop_loss_pct=0.10, take_profit_pct=0.50):
         self.balance = starting_balance
         self.risk_per_trade_pct = risk_per_trade_pct
-        self.stop_loss_pct = 0.10 # 10%
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        
+        # Simple TP stages for now, using the single TP target
         self.tp_stages = [
-            (1.0, 0.25), # 100% TP for 25% of position
-            (2.0, 0.25), # 200% TP for 25% of position
-            (3.0, 0.25), # 300% TP for 25% of position
-            (5.0, 0.25)  # 500% TP for 25% of position
+            (take_profit_pct, 1.0)
         ]
         self.max_open_trades = 5
         
@@ -27,10 +27,9 @@ class RiskManager:
         if pnl_pct <= -self.stop_loss_pct:
             return True, "Stop Loss", -self.stop_loss_pct
             
-        # Check TP stages (simple version returns True if first TP hit for backtest simplicity, 
-        # or we could simulate partials in backtest.py)
-        if pnl_pct >= self.tp_stages[0][0]:
-            return True, "Take Profit", pnl_pct
+        # Check TP
+        if pnl_pct >= self.take_profit_pct:
+            return True, f"Take Profit ({self.take_profit_pct*100:.0f}%)", pnl_pct
             
         return False, None, pnl_pct
 

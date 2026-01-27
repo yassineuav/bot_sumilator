@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShieldAlert, LineChart, Code2, History, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { LayoutDashboard, ShieldAlert, LineChart, Code2, History, Wifi, WifiOff, Loader2, Brain } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSystemStatus } from "@/context/SystemStatusContext";
 
@@ -12,6 +12,7 @@ export function Sidebar() {
     const links = [
         { href: "/", label: "Dashboard", icon: LayoutDashboard },
         { href: "/risk", label: "Risk & Backtest", icon: ShieldAlert },
+        { href: "/dashboard/trainAlgo", label: "Train Neural Net", icon: Brain },
         { href: "/dashboard/test-manual", label: "Test Manual", icon: History },
     ];
 

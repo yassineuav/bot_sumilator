@@ -150,6 +150,7 @@ export default function RiskManagement() {
 
     const timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
     const [timeframe, setTimeframe] = useState('15m');
+    const [modelType, setModelType] = useState('xgb'); // 'xgb', 'lstm', 'hybrid'
     const [trainingStatus, setTrainingStatus] = useState(null);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
@@ -170,7 +171,8 @@ export default function RiskManagement() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     symbol: formData.symbol,
-                    interval: timeframe
+                    interval: timeframe,
+                    model_type: modelType === 'xgb' ? 'xgboost' : modelType // Mapping 'xgb' -> 'xgboost'
                 })
             });
             const data = await res.json();
@@ -188,6 +190,37 @@ export default function RiskManagement() {
         }
     };
 
+    const trainCascadeSystem = async () => {
+        setTrainingStatus('Training Cascade...');
+        try {
+            const res = await fetch(`${apiUrl}/api/train/cascade/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: formData.symbol })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setTrainingStatus('Cascade Ready');
+                setTimeout(() => setTrainingStatus(null), 2000);
+            } else {
+                alert("Cascade Train Error: " + (data.error || 'Unknown'));
+                setTrainingStatus(null);
+            }
+        } catch (e) {
+            alert(e.message);
+            setTrainingStatus(null);
+        }
+    };
+
+    // Override train handler
+    const handleTrainClick = () => {
+        if (modelType === 'cascade') {
+            trainCascadeSystem();
+        } else {
+            trainCurrentModel();
+        }
+    };
+
     const trainAndSimulate = async () => {
         setLoading(true);
         setResult(null);
@@ -202,7 +235,8 @@ export default function RiskManagement() {
                     risk_pct: formData.risk_pct,
                     stop_loss: formData.stop_loss,
                     take_profit: formData.take_profit,
-                    zero_dte: formData.zero_dte
+                    zero_dte: formData.zero_dte,
+                    model_type: modelType === 'xgb' ? 'xgboost' : modelType
                 })
             });
             const data = await res.json();
@@ -230,7 +264,8 @@ export default function RiskManagement() {
                     stop_loss: formData.stop_loss,
                     take_profit: formData.take_profit,
                     bullish_threshold: formData.bullish_threshold,
-                    bearish_threshold: formData.bearish_threshold
+                    bearish_threshold: formData.bearish_threshold,
+                    model_type: modelType === 'xgb' ? 'xgboost' : modelType
                 })
             });
             const data = await res.json();
@@ -249,22 +284,39 @@ export default function RiskManagement() {
         <div className="space-y-6 p-4 md:p-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Risk & Predictor</h1>
+                <div className="flex gap-2">
+                    {/* Model Selection Buttons */}
+                    {['xgb', 'lstm', 'hybrid', 'cascade'].map((m) => (
+                        <button
+                            key={m}
+                            onClick={() => setModelType(m)}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-all
+                            ${modelType === m
+                                    ? 'bg-primary text-primary-foreground shadow-lg scale-105'
+                                    : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                        >
+                            {m === 'xgb' ? 'XGBOOST' : m === 'lstm' ? 'LSTM' : m === 'hybrid' ? 'HYBRID' : 'CASCADE'}
+                        </button>
+                    ))}
+                </div>
                 <button
-                    onClick={trainCurrentModel}
+                    onClick={handleTrainClick}
                     className="flex items-center justify-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition w-full md:w-auto text-sm"
                     disabled={trainingStatus !== null}
                 >
-                    <RefreshCw className={`w-4 h-4 ${trainingStatus === 'Training...' ? 'animate-spin' : ''}`} />
-                    {trainingStatus || `Retrain ${timeframe} Model`}
+                    <RefreshCw className={`w-4 h-4 ${trainingStatus && trainingStatus.includes('Training') ? 'animate-spin' : ''}`} />
+                    {trainingStatus || `Retrain ${modelType.toUpperCase()} Model`}
                 </button>
             </div>
 
             {/* Mobile Prediction Priority View */}
-            {prediction && (
-                <div className="lg:hidden animate-in fade-in slide-in-from-top-4 duration-500">
-                    <PredictionCard prediction={prediction} />
-                </div>
-            )}
+            {
+                prediction && (
+                    <div className="lg:hidden animate-in fade-in slide-in-from-top-4 duration-500">
+                        <PredictionCard prediction={prediction} />
+                    </div>
+                )
+            }
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Configuration Card */}
@@ -347,6 +399,8 @@ export default function RiskManagement() {
                                         value={formData.take_profit}
                                         onChange={handleInputChange}
                                         className="w-full p-2 rounded-md border bg-background text-green-500 font-bold"
+                                        min="0"
+                                        max="1000"
                                     />
                                 </div>
                             </div>
@@ -493,6 +547,6 @@ export default function RiskManagement() {
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

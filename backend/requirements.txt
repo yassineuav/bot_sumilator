@@ -19,3 +19,6 @@ requests
 beautifulsoup4
 uvicorn
 gunicorn
+tensorflow
+# joblib is usually included in sklearn but good to be explicit or if we use it directly
+joblib

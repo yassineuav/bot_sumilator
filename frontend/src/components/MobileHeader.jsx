@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X, LineChart, LayoutDashboard, ShieldAlert, History, WifiOff, Loader2 } from 'lucide-react';
+import { Menu, X, LineChart, LayoutDashboard, ShieldAlert, History, WifiOff, Loader2, Brain } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { useSystemStatus } from '@/context/SystemStatusContext';
 
@@ -14,6 +14,7 @@ export function MobileHeader() {
     const links = [
         { href: "/", label: "Dashboard", icon: LayoutDashboard },
         { href: "/risk", label: "Risk & Backtest", icon: ShieldAlert },
+        { href: "/dashboard/trainAlgo", label: "Train Neural Net", icon: Brain },
         { href: "/dashboard/test-manual", label: "Test Manual", icon: History },
     ];
 

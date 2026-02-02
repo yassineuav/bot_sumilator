@@ -109,6 +109,10 @@ class MultiTimeframePipeline:
             base_df = base_df.sort_index()
             df_1d = df_1d.sort_index()
             
+            # Ensure index types match (avoid resolution mismatch e.g. s vs ns)
+            if base_df.index.dtype != df_1d.index.dtype:
+                df_1d.index = df_1d.index.astype(base_df.index.dtype)
+            
             # Use merge_asof backwards.
             # For 1D data at T=00:00 (Today).
             # Intraday T=09:30 (Today). 
@@ -142,6 +146,10 @@ class MultiTimeframePipeline:
              # We can use merge_asof if sorted.
              base_df = base_df.sort_index()
              df_1h = df_1h.sort_index()
+             
+             # Ensure index types match
+             if base_df.index.dtype != df_1h.index.dtype:
+                 df_1h.index = df_1h.index.astype(base_df.index.dtype)
              
              # merge_asof matches nearest backward.
              # If base is 10:15, and we have 1H at 9:30 and 10:30.

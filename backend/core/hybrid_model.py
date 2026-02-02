@@ -12,10 +12,17 @@ class HybridModel:
         self.xgb_model = TradingModel(symbol, interval)
         self.lstm_model = LSTMModel(symbol, interval)
         
-    def train(self, df):
+    def train(self, df, force_retrain=False):
         # Train both models
         print(f"Training Hybrid Model for {self.symbol} {self.interval}...")
         
+        # Check if we should retrain or if models are already loaded
+        if not force_retrain:
+            loaded = self.load()
+            if loaded == True:
+                print("Hybrid Model: Sub-models already loaded, skipping training.")
+                return
+
         # 1. Train XGBoost
         print("--- Training XGBoost Sub-Model ---")
         self.xgb_model.train(df)
@@ -24,7 +31,7 @@ class HybridModel:
         print("--- Training LSTM Sub-Model ---")
         # LSTM might need specific data prep handled inside its train method
         # The dataframe passed here should have all necessary columns
-        self.lstm_model.train(df)
+        self.lstm_model.train(df, epochs=10) # Reduced epochs for standard training
         
         print("Hybrid Model Training Complete.")
         
@@ -143,14 +150,21 @@ class HybridModel:
             final_sig = xgb_sig
             # Avg confidence ?
             # LSTM "confidence" is vague, use XGB prob
-            if final_sig == 'CALL': confidence = xgb_bullish
-            else: confidence = xgb_bearish
+            if final_sig == 'CALL': confidence = float(xgb_bullish)
+            else: confidence = float(xgb_bearish)
         
         return {
             'signal': final_sig,
             'confidence': confidence,
             'models': {
-                'xgb': xgb_sig,
-                'lstm': lstm_sig
+                'xgb': {
+                    'signal': xgb_sig,
+                    'probs': [float(p) for p in xgb_probs]
+                },
+                'lstm': {
+                    'signal': lstm_sig,
+                    'next_price': float(next_price),
+                    'rel_diff': float(lstm_reldiff)
+                }
             }
         }
